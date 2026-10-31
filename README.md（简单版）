@@ -1,0 +1,9 @@
+# 金渐成美股策略自动监控
+
+每天自动检查核心标的池（第一兼唯一原则），结合回撤 + MACD(6,13,5) + 斐波那契 + VIX，共振时通过 Telegram 提醒。
+
+## 使用方法
+1. Fork 或直接使用本仓库
+2. 在 Secrets 添加 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID
+3. 复制 config.example.yaml 为 config.yaml
+4. 等待每天自动运行，或手动触发 Actions
