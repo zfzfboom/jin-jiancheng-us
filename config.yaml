@@ -1,0 +1,38 @@
+# 核心标的池（“第一兼唯一”）
+tickers:
+  - QQQ
+  - SPY
+  - NVDA
+  - MSFT
+  - GOOGL
+  - AMZN
+  - META
+  - AAPL
+  - TSLA
+  - TSM
+
+# MACD 参数（金渐成常用）
+macd:
+  fast: 6
+  slow: 13
+  signal: 5
+
+# 回撤启动阈值
+drawdown_start:
+  QQQ: 0.09
+  SPY: 0.065
+  default: 0.20          # 个股默认从高点回撤20%开始
+
+# 斐波那契关键位
+fib_levels: [0.382, 0.5, 0.618, 0.786]
+
+# VIX 阈值
+vix_levels:
+  warning: 30
+  strong: 40
+  extreme: 50
+
+# Telegram（必填）
+telegram:
+  enabled: true
+  # 这两个值请放到 GitHub Secrets，不要写在这里
