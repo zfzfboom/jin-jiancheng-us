@@ -2,13 +2,14 @@ name: Daily Jin Jiancheng Strategy Monitor
 
 on:
   schedule:
-    # 每天美股收盘后运行（UTC 21:30 ≈ 美东 16:30/17:30）
-    - cron: '30 21 * * 1-5'
+    # UTC 23:00 Mon-Fri ≈ 美东收盘后 2~3 小时，数据更完整，减少 GitHub 调度延迟导致漏跑
+    - cron: '0 23 * * 1-5'
   workflow_dispatch:  # 允许手动触发
 
 jobs:
   run-strategy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
