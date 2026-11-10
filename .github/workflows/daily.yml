@@ -2,8 +2,8 @@ name: Daily Jin Jiancheng Strategy Monitor
 
 on:
   schedule:
-    # UTC 23:00 Mon-Fri ≈ 美东收盘后 2~3 小时，数据更完整，减少 GitHub 调度延迟导致漏跑
-    - cron: '0 23 * * 1-5'
+    # UTC 23:00 每天（含周末）。周末会使用上一个交易日的数据
+    - cron: '0 23 * * *'
   workflow_dispatch:  # 允许手动触发
 
 jobs:
