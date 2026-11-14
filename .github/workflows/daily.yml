@@ -2,8 +2,8 @@ name: Daily Jin Jiancheng Strategy Monitor
 
 on:
   schedule:
-    # UTC 23:00 每天（含周末）。周末会使用上一个交易日的数据
-    - cron: '0 23 * * *'
+    # UTC 01:00 每天（含周末）。周末会使用上一个交易日的数据
+    - cron: '0 1 * * *'
   workflow_dispatch:  # 允许手动触发
 
 jobs:
