@@ -2,7 +2,7 @@ import os
 import yaml
 from datetime import datetime
 from strategy.data_fetcher import fetch_data, get_vix, get_last_bar_date
-from strategy.indicators import calculate_macd, calculate_fibonacci, get_fib_position
+from strategy.indicators import calculate_macd, calculate_fibonacci, get_fib_position, find_swing_high_low
 from strategy.rules import check_confluence
 from strategy.notifier import send_telegram
 
@@ -42,13 +42,19 @@ def main():
                 config["macd"]["slow"],
                 config["macd"]["signal"],
             )
-            high = float(df["High"].max())
-            low = float(df["Low"].min())
-            current = float(df["Close"].iloc[-1])
-            drawdown = (high - current) / high if high > 0 else 0.0
 
-            fibs = calculate_fibonacci(high, low)
-            fib_pos = get_fib_position(current, high, low)
+            # 日线波段高低点（近约 180 根K线内的峰值 + 峰值后最低点）
+            swing_high, swing_low = find_swing_high_low(df, lookback=180)
+            if swing_high is None or swing_low is None:
+                print(f"{ticker}: 无法确定波段高低点，跳过")
+                continue
+
+            current = float(df["Close"].iloc[-1])
+            # 回撤仍按「从波段高点」计算，和金渐成习惯一致
+            drawdown = (swing_high - current) / swing_high if swing_high > 0 else 0.0
+
+            fibs = calculate_fibonacci(swing_high, swing_low)
+            fib_pos = get_fib_position(current, swing_high, swing_low)
 
             # 判断共振
             signal = check_confluence(
@@ -111,14 +117,13 @@ def generate_summary(results, alerts, vix, vix_date, data_date, run_time):
         lines.append("今日无强共振信号。")
         lines.append("")
 
-    lines.append("【各标的状态】")
+    lines.append("【各标的状态】（斐波那契基于日线波段高点→低点）")
     for r in sorted(results, key=lambda x: x["drawdown"], reverse=True):
         status = "⚠️" if r["drawdown"] > 0.15 else "✅"
         fib = r.get("fib_pos") or {}
         fib_label = fib.get("nearest_label", "-")
         fib_pct = fib.get("retracement_pct", 0)
         # 距离最近斐波那契位较近时标注
-        near_note = ""
         if fib.get("distance_pct", 99) <= 3.0:
             near_note = f" ≈{fib_label}"
         else:
