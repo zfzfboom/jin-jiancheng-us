@@ -2,7 +2,7 @@ import os
 import yaml
 from datetime import datetime
 from strategy.data_fetcher import fetch_data, get_vix, get_last_bar_date
-from strategy.indicators import calculate_macd, calculate_fibonacci
+from strategy.indicators import calculate_macd, calculate_fibonacci, get_fib_position
 from strategy.rules import check_confluence
 from strategy.notifier import send_telegram
 
@@ -43,10 +43,12 @@ def main():
                 config["macd"]["signal"],
             )
             high = float(df["High"].max())
+            low = float(df["Low"].min())
             current = float(df["Close"].iloc[-1])
             drawdown = (high - current) / high if high > 0 else 0.0
 
-            fibs = calculate_fibonacci(high, float(df["Low"].min()))
+            fibs = calculate_fibonacci(high, low)
+            fib_pos = get_fib_position(current, high, low)
 
             # 判断共振
             signal = check_confluence(
@@ -63,6 +65,7 @@ def main():
                 "ticker": ticker,
                 "price": current,
                 "drawdown": drawdown,
+                "fib_pos": fib_pos,
                 "signal": signal,
                 "data_date": last_date,
             })
@@ -111,8 +114,18 @@ def generate_summary(results, alerts, vix, vix_date, data_date, run_time):
     lines.append("【各标的状态】")
     for r in sorted(results, key=lambda x: x["drawdown"], reverse=True):
         status = "⚠️" if r["drawdown"] > 0.15 else "✅"
+        fib = r.get("fib_pos") or {}
+        fib_label = fib.get("nearest_label", "-")
+        fib_pct = fib.get("retracement_pct", 0)
+        # 距离最近斐波那契位较近时标注
+        near_note = ""
+        if fib.get("distance_pct", 99) <= 3.0:
+            near_note = f" ≈{fib_label}"
+        else:
+            near_note = f" (近{fib_label})"
+
         lines.append(
-            f"{status} {r['ticker']}: 回撤 {r['drawdown']*100:.1f}% | 价格 {r['price']:.2f}"
+            f"{status} {r['ticker']}: 回撤 {r['drawdown']*100:.1f}% | 斐波那契 {fib_pct:.1f}%{near_note} | 价格 {r['price']:.2f}"
         )
 
     return "\n".join(lines)
