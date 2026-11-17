@@ -18,11 +18,13 @@ def check_confluence(ticker, current_price, drawdown, df, fibs, config, vix):
     macd_golden = (macd > signal) and (df["MACD"].iloc[-2] <= df["Signal"].iloc[-2])
     hist_turn_positive = hist > 0 and prev_hist <= 0
     
-    # 斐波那契支撑
+    # 斐波那契支撑（记录具体是哪个位）
     near_fib = False
+    near_fib_level = None
     for level, price in fibs.items():
         if abs(current_price - price) / price < 0.015:  # 1.5% 容差
             near_fib = True
+            near_fib_level = level
             break
     
     # 共振判断
@@ -35,8 +37,9 @@ def check_confluence(ticker, current_price, drawdown, df, fibs, config, vix):
             reasons.append("MACD金叉")
         if hist_turn_positive:
             reasons.append("柱状图转正")
-        if near_fib:
-            reasons.append("接近斐波那契支撑")
+        if near_fib and near_fib_level is not None:
+            label = f"{near_fib_level*100:.1f}%".rstrip("0").rstrip(".")
+            reasons.append(f"接近斐波那契{label}支撑")
         if vix >= config["vix_levels"]["warning"]:
             reasons.append(f"VIX={vix:.1f}")
         result["reason"] = " + ".join(reasons)
