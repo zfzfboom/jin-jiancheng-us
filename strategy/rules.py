@@ -18,11 +18,11 @@ def check_confluence(ticker, current_price, drawdown, df, fibs, config, vix):
     macd_golden = (macd > signal) and (df["MACD"].iloc[-2] <= df["Signal"].iloc[-2])
     hist_turn_positive = hist > 0 and prev_hist <= 0
     
-    # 斐波那契支撑（记录具体是哪个位）
+    # 斐波那契支撑（金渐成：38.2 / 50 / 61.8 等回撤位）
     near_fib = False
     near_fib_level = None
     for level, price in fibs.items():
-        if abs(current_price - price) / price < 0.015:  # 1.5% 容差
+        if price > 0 and abs(current_price - price) / price < 0.015:  # 1.5% 容差
             near_fib = True
             near_fib_level = level
             break
