@@ -11,35 +11,44 @@ def calculate_macd(df: pd.DataFrame, fast: int = 6, slow: int = 13, signal: int 
     return df
 
 
-def find_swing_high_low(df: pd.DataFrame, lookback: int = 180) -> tuple:
+def find_swing_high_low(
+    df: pd.DataFrame,
+    lookback: int = 180,
+    min_swing_pct: float = 0.12,
+) -> tuple:
     """
-    在日线图上找当前主要波段的摆动高点/低点：
-    1. 在近 lookback 根K线内找最高价（波段高点）
-    2. 取该高点之后出现的最低价（波段低点）
-    这样算出的斐波那契对应日线真实回撤，而不是全年极值。
+    在日线图上找有意义的波段高点/低点，用于斐波那契。
+
+    规则：
+    1. 在近 lookback 根K线内找最高价作为候选高点
+    2. 取该高点之后的最低价作为低点
+    3. 若这段回撤幅度 < min_swing_pct（默认12%），说明只是浅回踩，
+       不是有效斐波那契波段 → 返回 (high, low, valid=False)
+    4. 若有效，返回 (high, low, valid=True)
+
+    这样可避免「回撤只有7%却显示斐波那契近100%」的荒谬结果。
     """
     if df is None or len(df) < 10:
-        return None, None
+        return None, None, False
 
     recent = df.iloc[-lookback:] if len(df) > lookback else df
 
-    # 波段高点：近期最高价及其位置
     high_idx = recent["High"].idxmax()
     swing_high = float(recent.loc[high_idx, "High"])
 
-    # 波段低点：高点之后的最低价（若高点就是最后一根，则退回用近期最低）
     after = df.loc[high_idx:]
     if len(after) >= 2:
         swing_low = float(after["Low"].min())
     else:
         swing_low = float(recent["Low"].min())
 
-    # 兜底：高点必须高于低点
-    if swing_high <= swing_low:
-        swing_high = float(recent["High"].max())
-        swing_low = float(recent["Low"].min())
+    if swing_high <= swing_low or swing_high <= 0:
+        return swing_high, swing_low, False
 
-    return swing_high, swing_low
+    swing_depth = (swing_high - swing_low) / swing_high
+    valid = swing_depth >= min_swing_pct
+
+    return swing_high, swing_low, valid
 
 
 def calculate_fibonacci(high: float, low: float) -> dict:
@@ -56,25 +65,34 @@ def calculate_fibonacci(high: float, low: float) -> dict:
     }
 
 
-def get_fib_position(current: float, high: float, low: float) -> dict:
+def get_fib_position(current: float, high: float, low: float, valid: bool = True) -> dict:
     """
     计算当前价格在日线波段斐波那契回撤中的位置。
 
-    retracement_pct: 从高点回撤了多少（0=仍在高点，100=已到波段低点）
-    nearest_label: 最近的经典位，如 "38.2%" / "50%"
+    若 valid=False（波段过浅），不给出误导性的百分比，只标记为浅回撤。
     """
-    if high is None or low is None or high <= low or high <= 0:
-        return {
-            "retracement_pct": 0.0,
-            "nearest_level": 0.0,
-            "nearest_label": "-",
-            "distance_pct": 99.0,
-            "swing_high": high,
-            "swing_low": low,
-        }
+    empty = {
+        "retracement_pct": None,
+        "nearest_level": None,
+        "nearest_label": "浅回撤",
+        "distance_pct": 99.0,
+        "swing_high": high,
+        "swing_low": low,
+        "valid": False,
+        "swing_depth_pct": None,
+    }
+
+    if not valid or high is None or low is None or high <= low or high <= 0:
+        depth = None
+        if high and low and high > low and high > 0:
+            depth = round((high - low) / high * 100, 1)
+        empty["swing_depth_pct"] = depth
+        return empty
 
     diff = high - low
     retrace = (high - current) / diff
+    # 限制在合理范围，避免价格略超波段时出现离谱数字
+    retrace = max(0.0, min(retrace, 1.2))
     retracement_pct = retrace * 100
 
     classic = [0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]
@@ -98,4 +116,6 @@ def get_fib_position(current: float, high: float, low: float) -> dict:
         "distance_pct": round(distance_pct, 1),
         "swing_high": round(high, 2),
         "swing_low": round(low, 2),
+        "valid": True,
+        "swing_depth_pct": round((high - low) / high * 100, 1),
     }
