@@ -17,7 +17,6 @@ def main():
     run_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
     print(f"开始运行金渐成策略监控 - {run_time}")
 
-    # 获取 VIX（带日期）
     vix, vix_date = get_vix()
     print(f"当前 VIX: {vix:.2f} (数据日: {vix_date or 'N/A'})")
 
@@ -35,7 +34,6 @@ def main():
             last_date = get_last_bar_date(df)
             data_dates.add(last_date)
 
-            # 计算指标
             df = calculate_macd(
                 df,
                 config["macd"]["fast"],
@@ -43,20 +41,20 @@ def main():
                 config["macd"]["signal"],
             )
 
-            # 日线波段高低点（近约 180 根K线内的峰值 + 峰值后最低点）
-            swing_high, swing_low = find_swing_high_low(df, lookback=180)
+            # 日线波段：要求回撤幅度至少约 12%，否则不算有效斐波那契波段
+            swing_high, swing_low, swing_valid = find_swing_high_low(
+                df, lookback=180, min_swing_pct=0.12
+            )
             if swing_high is None or swing_low is None:
                 print(f"{ticker}: 无法确定波段高低点，跳过")
                 continue
 
             current = float(df["Close"].iloc[-1])
-            # 回撤仍按「从波段高点」计算，和金渐成习惯一致
             drawdown = (swing_high - current) / swing_high if swing_high > 0 else 0.0
 
-            fibs = calculate_fibonacci(swing_high, swing_low)
-            fib_pos = get_fib_position(current, swing_high, swing_low)
+            fibs = calculate_fibonacci(swing_high, swing_low) if swing_valid else {}
+            fib_pos = get_fib_position(current, swing_high, swing_low, valid=swing_valid)
 
-            # 判断共振
             signal = check_confluence(
                 ticker=ticker,
                 current_price=current,
@@ -82,14 +80,11 @@ def main():
         except Exception as e:
             print(f"{ticker} 处理失败: {e}")
 
-    # 数据日期（取最常见的）
     main_data_date = max(data_dates, key=list(data_dates).count) if data_dates else "unknown"
 
-    # 生成总结（即使没有结果也推送，避免“静默失败”）
     summary = generate_summary(results, alerts, vix, vix_date, main_data_date, run_time)
     print(summary)
 
-    # 推送 Telegram（强制推送，只要配置了）
     if config.get("telegram", {}).get("enabled", True):
         ok = send_telegram(summary)
         if not ok:
@@ -117,20 +112,29 @@ def generate_summary(results, alerts, vix, vix_date, data_date, run_time):
         lines.append("今日无强共振信号。")
         lines.append("")
 
-    lines.append("【各标的状态】（斐波那契基于日线波段高点→低点）")
+    lines.append("【各标的状态】")
     for r in sorted(results, key=lambda x: x["drawdown"], reverse=True):
         status = "⚠️" if r["drawdown"] > 0.15 else "✅"
         fib = r.get("fib_pos") or {}
-        fib_label = fib.get("nearest_label", "-")
-        fib_pct = fib.get("retracement_pct", 0)
-        # 距离最近斐波那契位较近时标注
-        if fib.get("distance_pct", 99) <= 3.0:
-            near_note = f" ≈{fib_label}"
+
+        if fib.get("valid"):
+            fib_pct = fib.get("retracement_pct", 0)
+            fib_label = fib.get("nearest_label", "-")
+            if fib.get("distance_pct", 99) <= 3.0:
+                near_note = f" ≈{fib_label}"
+            else:
+                near_note = f" (近{fib_label})"
+            fib_text = f"斐波那契 {fib_pct:.1f}%{near_note}"
         else:
-            near_note = f" (近{fib_label})"
+            # 波段太浅，不输出误导性的「近100%」
+            depth = fib.get("swing_depth_pct")
+            if depth is not None:
+                fib_text = f"浅回撤(波段仅{depth}%)"
+            else:
+                fib_text = "浅回撤"
 
         lines.append(
-            f"{status} {r['ticker']}: 回撤 {r['drawdown']*100:.1f}% | 斐波那契 {fib_pct:.1f}%{near_note} | 价格 {r['price']:.2f}"
+            f"{status} {r['ticker']}: 回撤 {r['drawdown']*100:.1f}% | {fib_text} | 价格 {r['price']:.2f}"
         )
 
     return "\n".join(lines)
