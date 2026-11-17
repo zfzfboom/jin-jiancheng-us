@@ -2,8 +2,8 @@ import yfinance as yf
 import pandas as pd
 from typing import Optional, Tuple
 
-def fetch_data(ticker: str, period: str = "1y") -> Optional[pd.DataFrame]:
-    """Download daily OHLCV. Returns DataFrame or None on failure."""
+def fetch_data(ticker: str, period: str = "2y") -> Optional[pd.DataFrame]:
+    """Download daily OHLCV (default 2y for multi-level Fibonacci). Returns DataFrame or None."""
     try:
         df = yf.download(
             ticker,
