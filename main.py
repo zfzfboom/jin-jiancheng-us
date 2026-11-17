@@ -2,7 +2,13 @@ import os
 import yaml
 from datetime import datetime
 from strategy.data_fetcher import fetch_data, get_vix, get_last_bar_date
-from strategy.indicators import calculate_macd, calculate_fibonacci, get_fib_position, find_upswing
+from strategy.indicators import (
+    calculate_macd,
+    calculate_fibonacci,
+    get_fib_position,
+    find_upswing,
+    format_fib_line,
+)
 from strategy.rules import check_confluence
 from strategy.notifier import send_telegram
 
@@ -26,7 +32,7 @@ def main():
 
     for ticker in tickers:
         try:
-            df = fetch_data(ticker)
+            df = fetch_data(ticker)  # 2y
             if df is None or len(df) < 50:
                 print(f"{ticker}: 跳过（数据不足）")
                 continue
@@ -41,20 +47,35 @@ def main():
                 config["macd"]["signal"],
             )
 
-            # 金渐成：上涨波段 低点→高点 画斐波那契
-            swing_low, swing_high, swing_valid = find_upswing(
+            current = float(df["Close"].iloc[-1])
+
+            # 中波段：近约 180 根日K（如 NVDA 2026-03 低 → 2026-10 高）
+            m_low, m_high, m_ok, m_ld, m_hd = find_upswing(
                 df, lookback=180, min_move_pct=0.12
             )
-            if swing_low is None or swing_high is None:
-                print(f"{ticker}: 无法确定上涨波段，跳过")
+            # 大波段：近约 500 根日K / 全样本（如 NVDA 2025-04 低 → 2026-10 高）
+            M_low, M_high, M_ok, M_ld, M_hd = find_upswing(
+                df, lookback=500, min_move_pct=0.20
+            )
+
+            # 回撤仍相对「最近波段高点」（中、大通常同一高点）
+            ref_high = m_high if m_high else M_high
+            if ref_high is None or ref_high <= 0:
+                print(f"{ticker}: 无法确定波段高点，跳过")
                 continue
+            drawdown = (ref_high - current) / ref_high
 
-            current = float(df["Close"].iloc[-1])
-            # 回撤：相对波段高点跌了多少（日常口径）
-            drawdown = (swing_high - current) / swing_high if swing_high > 0 else 0.0
+            fib_mid = get_fib_position(current, m_low, m_high, m_ok, m_ld, m_hd)
+            fib_maj = get_fib_position(current, M_low, M_high, M_ok, M_ld, M_hd)
 
-            fibs = calculate_fibonacci(swing_low, swing_high) if swing_valid else {}
-            fib_pos = get_fib_position(current, swing_low, swing_high, valid=swing_valid)
+            # 共振：两层斐波那契价位都纳入（谁接近谁触发）
+            fibs = {}
+            if m_ok:
+                fibs.update(calculate_fibonacci(m_low, m_high))
+            if M_ok:
+                # 大波段用略不同的 key 后缀避免覆盖；rules 只关心 price
+                for k, v in calculate_fibonacci(M_low, M_high).items():
+                    fibs[k + 0.0001] = v  # 保持可迭代，level 近似原值
 
             signal = check_confluence(
                 ticker=ticker,
@@ -70,7 +91,8 @@ def main():
                 "ticker": ticker,
                 "price": current,
                 "drawdown": drawdown,
-                "fib_pos": fib_pos,
+                "fib_mid": fib_mid,
+                "fib_maj": fib_maj,
                 "signal": signal,
                 "data_date": last_date,
             })
@@ -113,35 +135,18 @@ def generate_summary(results, alerts, vix, vix_date, data_date, run_time):
         lines.append("今日无强共振信号。")
         lines.append("")
 
-    lines.append("【各标的状态】（斐波那契：上涨波段低→高，金渐成画法）")
+    lines.append("【各标的状态】双层斐波那契（金渐成：低→高）")
+    lines.append("中波段≈近半年 | 大波段≈近2年")
+    lines.append("")
+
     for r in sorted(results, key=lambda x: x["drawdown"], reverse=True):
         status = "⚠️" if r["drawdown"] > 0.15 else "✅"
-        fib = r.get("fib_pos") or {}
-
-        if fib.get("valid"):
-            fib_pct = fib.get("retracement_pct", 0)
-            fib_label = fib.get("nearest_label", "-")
-            if fib.get("distance_pct", 99) <= 2.5:
-                near_note = f"≈{fib_label}支撑"
-            else:
-                near_note = f"近{fib_label}"
-
-            # 附带关键价位，方便对照
-            prices = fib.get("fib_prices") or {}
-            p382 = prices.get(0.382)
-            p50 = prices.get(0.5)
-            p618 = prices.get(0.618)
-            price_hint = ""
-            if p382 and p50 and p618:
-                price_hint = f" | 38.2%={p382} 50%={p50} 61.8%={p618}"
-
-            fib_text = f"回撤至{fib_pct:.1f}%({near_note}){price_hint}"
-        else:
-            fib_text = "无有效上涨波段"
-
         lines.append(
-            f"{status} {r['ticker']}: 自高点回撤 {r['drawdown']*100:.1f}% | {fib_text} | 现价 {r['price']:.2f}"
+            f"{status} {r['ticker']} 现价 {r['price']:.2f} | 自高点回撤 {r['drawdown']*100:.1f}%"
         )
+        lines.append("  " + format_fib_line(r.get("fib_mid") or {}, "中波段"))
+        lines.append("  " + format_fib_line(r.get("fib_maj") or {}, "大波段"))
+        lines.append("")
 
     return "\n".join(lines)
 
